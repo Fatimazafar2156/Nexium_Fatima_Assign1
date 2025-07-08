@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,12 +16,15 @@ import {
   getAvailableTopics,
   Quote,
 } from "@/data/quotes";
+import { QuoteImageGenerator } from "@/components/quote-image-generator";
+import { toast } from "sonner";
 import {
   Search,
   Sparkles,
   Quote as QuoteIcon,
-  RefreshCw,
   Tag,
+  Download,
+  Wifi,
 } from "lucide-react";
 
 export default function Home() {
@@ -31,6 +34,9 @@ export default function Home() {
   const [matchedTopic, setMatchedTopic] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [selectedQuoteForImage, setSelectedQuoteForImage] =
+    useState<Quote | null>(null);
+  const [isUsingAPI, setIsUsingAPI] = useState(false);
 
   const availableTopics = getAvailableTopics();
 
@@ -40,36 +46,39 @@ export default function Home() {
 
     setIsLoading(true);
 
-    // Simulate loading for better UX
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const result = await findQuotesWithFallback(topic.trim(), 3);
+      setQuotes(result.quotes);
+      setSuggestions(result.suggestions);
+      setMatchedTopic(result.matchedTopic || "");
+      setIsUsingAPI(false); // Using local data for now
+      setHasSearched(true);
 
-    const result = findQuotesWithFallback(topic.trim(), 3);
-    setQuotes(result.quotes);
-    setSuggestions(result.suggestions);
-    setMatchedTopic(result.matchedTopic || "");
-    setHasSearched(true);
-    setIsLoading(false);
+      if (result.quotes.length > 0) {
+        toast.success(`Found ${result.quotes.length} quotes about "${topic}"`);
+      } else {
+        toast.info(
+          `No quotes found for "${topic}". Try the suggestions below.`,
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching quotes:", error);
+      setQuotes([]);
+      setSuggestions([]);
+      setIsUsingAPI(false);
+      setHasSearched(true);
+      toast.error("Failed to fetch quotes. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleTopicSelect = (selectedTopic: string) => {
     setTopic(selectedTopic);
   };
 
-  const regenerateQuotes = () => {
-    if (!topic.trim()) return;
-
-    setIsLoading(true);
-    setTimeout(() => {
-      const result = findQuotesWithFallback(topic.trim(), 3);
-      setQuotes(result.quotes);
-      setSuggestions(result.suggestions);
-      setMatchedTopic(result.matchedTopic || "");
-      setIsLoading(false);
-    }, 500);
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 via-purple-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20">
+    <div className="min-h-screen bg-gradient-to-br from-brand-50 via-purple-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 animate-fadeIn">
       {/* Hero Section */}
       <div className="container mx-auto px-4 py-16">
         <div className="text-center mb-12">
@@ -86,6 +95,7 @@ export default function Home() {
             three carefully selected motivational quotes to inspire your
             journey.
           </p>
+          {/* API status temporarily hidden while fixing API issues */}
         </div>
 
         {/* Search Form */}
@@ -115,7 +125,7 @@ export default function Home() {
                 className="h-12 px-8 bg-brand-gradient hover:bg-brand-gradient-intense"
               >
                 {isLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <Sparkles className="h-4 w-4 animate-spin" />
                 ) : (
                   "Get Quotes"
                 )}
@@ -150,8 +160,8 @@ export default function Home() {
           <div className="max-w-4xl mx-auto">
             {quotes.length > 0 ? (
               <>
-                <div className="flex items-center justify-center gap-4 mb-8">
-                  <h2 className="text-3xl font-bold text-center capitalize">
+                <div className="text-center mb-8">
+                  <h2 className="text-3xl font-bold capitalize">
                     {matchedTopic &&
                     matchedTopic !== topic.toLowerCase().trim() ? (
                       <>
@@ -164,18 +174,6 @@ export default function Home() {
                       `Quotes about "${matchedTopic || topic}"`
                     )}
                   </h2>
-                  <Button
-                    onClick={regenerateQuotes}
-                    variant="outline"
-                    size="sm"
-                    disabled={isLoading}
-                    className="border-brand-200 hover:bg-brand-50"
-                  >
-                    <RefreshCw
-                      className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
-                    />
-                    New Quotes
-                  </Button>
                 </div>
 
                 <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-3">
@@ -187,15 +185,36 @@ export default function Home() {
                       <CardContent className="p-6">
                         <div className="flex items-start gap-3">
                           <QuoteIcon className="h-6 w-6 text-brand-500 mt-1 flex-shrink-0" />
-                          <div className="space-y-4">
+                          <div className="space-y-4 flex-1">
                             <blockquote className="text-lg leading-relaxed font-medium text-foreground">
                               &quot;{quote.text}&quot;
                             </blockquote>
-                            <footer>
+                            <div className="flex items-center justify-between">
                               <cite className="text-brand-600 font-semibold not-italic">
                                 — {quote.author}
                               </cite>
-                            </footer>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedQuoteForImage(quote)}
+                                className="text-brand-500 hover:text-brand-600 hover:bg-brand-50"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {quote.tags && quote.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {quote.tags.slice(0, 3).map((tag, tagIndex) => (
+                                  <Badge
+                                    key={tagIndex}
+                                    variant="secondary"
+                                    className="text-xs"
+                                  >
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </CardContent>
@@ -291,6 +310,15 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Quote Image Generator Modal */}
+      {selectedQuoteForImage && (
+        <QuoteImageGenerator
+          quote={selectedQuoteForImage}
+          isVisible={!!selectedQuoteForImage}
+          onClose={() => setSelectedQuoteForImage(null)}
+        />
+      )}
     </div>
   );
 }
